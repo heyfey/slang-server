@@ -28,6 +28,9 @@
 #include "slang/driver/Driver.h"
 #include "slang/text/SourceManager.h"
 namespace server {
+
+class ConeLeaf;
+
 class SlangServer : public lsp::LspServer<SlangServer>, public SlangServerWcp {
     /// The primary business logic for the server, in a type safe manner.
     /// To add an LSP method:
@@ -239,5 +242,14 @@ public:
 
     /// Get the mutex to prevent collisions between LSP and WCP message handling
     std::mutex& getMutex() final { return mutex; };
+
+private:
+    /// Convert a cone of drivers to CallHierarchyIncomingCall items
+    std::vector<lsp::CallHierarchyIncomingCall>
+    coneToIncomingCalls(const std::set<ConeLeaf>& cone);
+
+    /// Convert a cone of loads to CallHierarchyOutgoingCall items
+    std::vector<lsp::CallHierarchyOutgoingCall>
+    coneToOutgoingCalls(const std::set<ConeLeaf>& cone);
 };
 } // namespace server

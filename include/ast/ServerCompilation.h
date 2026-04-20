@@ -65,35 +65,6 @@ public:
     /// Get document and position params for a given RTL path
     std::optional<lsp::ShowDocumentParams> getHierDocParams(const std::string& path);
 
-    /// Populate incoming / outgoing (drivers / loads) call hierarchy LSP responses
-    template<typename P, typename R>
-    std::optional<std::vector<R>> getCallHierarchyCalls(const P& params) {
-        static constexpr bool isDriver =
-            std::is_same<P, lsp::CallHierarchyIncomingCallsParams>::value;
-        auto cone = getCone<isDriver>(params.item.name);
-
-        std::vector<R> result;
-        for (const auto leaf : cone) {
-            std::string hier = leaf.getHierarchicalPath();
-            auto range = leaf.getSourceRange();
-            if (range.start().valid()) {
-                auto fullPath = std::filesystem::absolute(
-                    m_sourceManager.getFileName(range.start()));
-                // only different by to / from field name . . . sigh
-                if constexpr (std::is_same_v<lsp::CallHierarchyIncomingCallsParams, P>) {
-                    result.push_back({.from = {.name = hier, .uri = URI::fromFile(fullPath)},
-                                      .fromRanges = {{toRange(range, m_sourceManager)}}});
-                }
-                else {
-                    result.push_back({.to = {.name = hier, .uri = URI::fromFile(fullPath)},
-                                      .fromRanges = {{toRange(range, m_sourceManager)}}});
-                }
-            }
-        }
-
-        return std::optional(result);
-    }
-
     /// Return list of RTL paths for a driver or load cone
     template<bool isDrivers>
     std::vector<std::string> getConePaths(const std::string& path) {
@@ -109,27 +80,6 @@ public:
 
         return result;
     }
-
-private:
-    /// The Slang documents this compilation is based on
-    std::vector<std::shared_ptr<SlangDoc>> m_documents;
-
-    /// Copy of compilation options
-    Bag m_options;
-
-    /// Index of buffer -> definitions and definition -> instances given a compilation. Used for
-    /// navigating a compilation
-    InstanceIndexer m_instances;
-
-    /// Index of value symbol -> uses (e.g. processes or continuous assignments)
-    std::optional<ReferenceIndexer> m_references = std::nullopt;
-
-    /// Reference to the source manager for this compilation,
-    /// owned by the driver
-    SourceManager& m_sourceManager;
-
-    template<bool isDrivers>
-    struct ConeSelector;
 
     /// Get cone leaves (drivers or loads depending on template parameter) for a given RTL path
     template<bool isDrivers>
@@ -164,6 +114,27 @@ private:
 
         return coneTracer.getLeaves();
     }
+
+private:
+    /// The Slang documents this compilation is based on
+    std::vector<std::shared_ptr<SlangDoc>> m_documents;
+
+    /// Copy of compilation options
+    Bag m_options;
+
+    /// Index of buffer -> definitions and definition -> instances given a compilation. Used for
+    /// navigating a compilation
+    InstanceIndexer m_instances;
+
+    /// Index of value symbol -> uses (e.g. processes or continuous assignments)
+    std::optional<ReferenceIndexer> m_references = std::nullopt;
+
+    /// Reference to the source manager for this compilation,
+    /// owned by the driver
+    SourceManager& m_sourceManager;
+
+    template<bool isDrivers>
+    struct ConeSelector;
 };
 
 template<>

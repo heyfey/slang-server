@@ -10,10 +10,12 @@
 #include "SlangServer.h"
 
 #include "Config.h"
+#include "ast/ConeTracer.h"
 #include "ast/WcpClient.h"
 #include "completions/CompletionDispatch.h"
 #include "lsp/LspTypes.h"
 #include "lsp/URI.h"
+#include "util/Converters.h"
 #include "util/Logging.h"
 #include <algorithm>
 #include <filesystem>
@@ -427,8 +429,8 @@ std::optional<std::vector<lsp::CallHierarchyIncomingCall>> SlangServer::
         ERROR("No compilation available, cannot trace cones");
         return std::nullopt;
     }
-    return m_driver->comp->getCallHierarchyCalls<lsp::CallHierarchyIncomingCallsParams,
-                                                 lsp::CallHierarchyIncomingCall>(params);
+    auto cone = m_driver->comp->getCone<true>(params.item.name);
+    return coneToIncomingCalls(cone);
 }
 
 std::optional<std::vector<lsp::CallHierarchyOutgoingCall>> SlangServer::
@@ -437,8 +439,8 @@ std::optional<std::vector<lsp::CallHierarchyOutgoingCall>> SlangServer::
         ERROR("No compilation available, cannot trace cones");
         return std::nullopt;
     }
-    return m_driver->comp->getCallHierarchyCalls<lsp::CallHierarchyOutgoingCallsParams,
-                                                 lsp::CallHierarchyOutgoingCall>(params);
+    auto cone = m_driver->comp->getCone<false>(params.item.name);
+    return coneToOutgoingCalls(cone);
 }
 
 std::vector<std::string> SlangServer::getDrivers(const std::string& path) {
@@ -463,18 +465,8 @@ SlangServer::getDriversWithLocation(const std::string& hierPath) {
         ERROR("No compilation available, cannot trace cones");
         return std::nullopt;
     }
-    // Get URI if available for the CallHierarchyItem
-    URI uri;
-    auto docParams = m_driver->comp->getHierDocParams(hierPath);
-    if (docParams) {
-        uri = docParams->uri;
-    }
-    // Create minimal CallHierarchyItem with just name (and URI if available)
-    // The template only uses params.item.name, so other fields can be default-initialized
-    lsp::CallHierarchyItem item{.name = hierPath, .uri = uri};
-    lsp::CallHierarchyIncomingCallsParams params{.item = item};
-    return m_driver->comp->getCallHierarchyCalls<lsp::CallHierarchyIncomingCallsParams,
-                                                  lsp::CallHierarchyIncomingCall>(params);
+    auto cone = m_driver->comp->getCone<true>(hierPath);
+    return coneToIncomingCalls(cone);
 }
 
 std::optional<std::vector<lsp::CallHierarchyOutgoingCall>>
@@ -483,18 +475,40 @@ SlangServer::getLoadsWithLocation(const std::string& hierPath) {
         ERROR("No compilation available, cannot trace cones");
         return std::nullopt;
     }
-    // Get URI if available for the CallHierarchyItem
-    URI uri;
-    auto docParams = m_driver->comp->getHierDocParams(hierPath);
-    if (docParams) {
-        uri = docParams->uri;
+    auto cone = m_driver->comp->getCone<false>(hierPath);
+    return coneToOutgoingCalls(cone);
+}
+
+std::vector<lsp::CallHierarchyIncomingCall>
+SlangServer::coneToIncomingCalls(const std::set<ConeLeaf>& cone) {
+    std::vector<lsp::CallHierarchyIncomingCall> result;
+    for (const auto leaf : cone) {
+        std::string hier = leaf.getHierarchicalPath();
+        auto range = leaf.getSourceRange();
+        if (range.start().valid()) {
+            auto fullPath = std::filesystem::absolute(
+                m_driver->sm.getFileName(range.start()));
+            result.push_back({.from = {.name = hier, .uri = URI::fromFile(fullPath)},
+                              .fromRanges = {{toRange(range, m_driver->sm)}}});
+        }
     }
-    // Create minimal CallHierarchyItem with just name (and URI if available)
-    // The template only uses params.item.name, so other fields can be default-initialized
-    lsp::CallHierarchyItem item{.name = hierPath, .uri = uri};
-    lsp::CallHierarchyOutgoingCallsParams params{.item = item};
-    return m_driver->comp->getCallHierarchyCalls<lsp::CallHierarchyOutgoingCallsParams,
-                                                  lsp::CallHierarchyOutgoingCall>(params);
+    return result;
+}
+
+std::vector<lsp::CallHierarchyOutgoingCall>
+SlangServer::coneToOutgoingCalls(const std::set<ConeLeaf>& cone) {
+    std::vector<lsp::CallHierarchyOutgoingCall> result;
+    for (const auto leaf : cone) {
+        std::string hier = leaf.getHierarchicalPath();
+        auto range = leaf.getSourceRange();
+        if (range.start().valid()) {
+            auto fullPath = std::filesystem::absolute(
+                m_driver->sm.getFileName(range.start()));
+            result.push_back({.to = {.name = hier, .uri = URI::fromFile(fullPath)},
+                              .fromRanges = {{toRange(range, m_driver->sm)}}});
+        }
+    }
+    return result;
 }
 
 void SlangServer::loadConfig(const Config& config, bool forceIndexing) {
